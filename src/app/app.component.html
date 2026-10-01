@@ -6,10 +6,10 @@
       <div><strong>权利要求映射工作台</strong><small>Claim-to-Spec Traceability</small></div>
     </div>
     <div class="top-actions">
-      <span class="save-state">浏览器本地自动保存</span>
+      <span class="save-state">两侧状态本地分开保存</span>
       <p-button label="撤销" icon="pi pi-undo" severity="secondary" [outlined]="true" [disabled]="!history.past" (onClick)="service.undo()" pTooltip="Ctrl / ⌘ + Z"></p-button>
       <p-button label="重做" icon="pi pi-redo" severity="secondary" [outlined]="true" [disabled]="!history.future" (onClick)="service.redo()" pTooltip="Ctrl / ⌘ + Shift + Z"></p-button>
-      <p-button label="保存版本" icon="pi pi-save" (onClick)="versionDialog = true" pTooltip="Ctrl / ⌘ + S"></p-button>
+      <p-button label="保存版本" icon="pi pi-save" [disabled]="!canEditMainData" (onClick)="versionDialog = true" pTooltip="Ctrl / ⌘ + S"></p-button>
     </div>
   </header>
 
@@ -18,12 +18,12 @@
       <section class="panel role-panel">
         <label for="role">当前角色</label>
         <p-select inputId="role" [options]="roleOptions" optionLabel="label" optionValue="value" [ngModel]="state.role" (ngModelChange)="service.setRole($event)" />
-        <p class="hint">{{ currentRoleLabel }}。批注权限按作者锁定。</p>
+        <p class="hint">{{ currentRoleLabel }}</p>
       </section>
 
       <section class="panel">
-        <div class="panel-heading"><span>权利要求</span><p-badge [value]="state.claims.length" severity="secondary" /></div>
-        <button *ngFor="let claim of state.claims" type="button" class="claim-nav" [class.active]="claim.id === state.selectedClaimId" (click)="service.selectClaim(claim.id)">
+        <div class="panel-heading"><span>权利要求</span><p-badge [value]="state.author.claims.length" severity="secondary" /></div>
+        <button *ngFor="let claim of state.author.claims" type="button" class="claim-nav" [class.active]="claim.id === state.selectedClaimId" (click)="service.selectClaim(claim.id)">
           <span class="claim-number">{{ claim.number }}</span>
           <span><strong>{{ claim.title }}</strong><small>{{ claim.independent ? '独立权利要求' : '从属权利要求' }}</small></span>
         </button>
@@ -41,30 +41,39 @@
 
       <section class="panel export-panel">
         <span class="eyebrow">核对结果</span>
-        <p-button label="导出 JSON" icon="pi pi-download" [outlined]="true" (onClick)="exportFile('json')" />
-        <p-button label="导出 CSV" icon="pi pi-table" [outlined]="true" (onClick)="exportFile('csv')" />
+        <p-button label="导出 JSON（含两侧状态）" icon="pi pi-download" [outlined]="true" (onClick)="exportFile('json')" />
+        <p-button label="导出 CSV（含审查结论）" icon="pi pi-table" [outlined]="true" (onClick)="exportFile('csv')" />
       </section>
     </aside>
 
     <section class="main-panel" *ngIf="selectedClaim as claim">
       <div class="page-heading">
-        <div><span class="eyebrow">案件 CN-2026-0917</span><h1>{{ claim.title }}</h1><p>独立项与从属项在同一视图中完成拆解、引用和支持映射。</p></div>
-        <div class="status-stack"><span class="status-chip ready">本地草稿</span><span class="updated">所有编辑实时持久化</span></div>
+        <div><span class="eyebrow">案件 CN-2026-0917</span><h1>{{ claim.title }}</h1><p>代理人持有特征与支持依据；审查员持有批注与审查结论，双方各自保存、带回对账。</p></div>
+        <div class="status-stack"><span class="status-chip ready" [class.examiner-chip]="isExaminer">{{ state.role === 'author' ? '代理人工作台' : state.role === 'examiner' ? '审查员工作台' : '观察者（只读）' }}</span><span class="updated">所有编辑实时持久化到各自一侧</span></div>
+      </div>
+
+      <div *ngIf="syncMessage as message" class="sync-flash" [class.ok]="message.ok" [class.fail]="!message.ok">
+        <i class="pi" [class.pi-check-circle]="message.ok" [class.pi-times-circle]="!message.ok"></i><span>{{ message.text }}</span>
       </div>
 
       <nav class="tabs" aria-label="工作台视图">
         <button [class.active]="state.activeTab === 'mapping'" (click)="service.setTab('mapping')"><i class="pi pi-sitemap"></i>特征映射</button>
         <button [class.active]="state.activeTab === 'claim'" (click)="service.setTab('claim')"><i class="pi pi-file-edit"></i>权利要求录入</button>
+        <button [class.active]="state.activeTab === 'sync'" (click)="goSync()"><i class="pi pi-sync"></i>审查同步</button>
         <button [class.active]="state.activeTab === 'compare'" (click)="service.setTab('compare')"><i class="pi pi-arrows-h"></i>版本比较</button>
         <button [class.active]="state.activeTab === 'audit'" (click)="service.setTab('audit')"><i class="pi pi-check-square"></i>核对清单</button>
       </nav>
 
       <div class="view" *ngIf="state.activeTab === 'mapping'">
+        <div class="role-readonly-hint" *ngIf="!canEditMainData">
+          <i class="pi pi-lock"></i>
+          <span>技术特征、层级、引用与支持段落仅代理人可编辑。审查意见请切换到「审查同步」页签处理。</span>
+        </div>
         <div class="mapping-grid">
           <section class="panel feature-list-panel">
-            <div class="panel-heading"><span>技术特征树</span><p-button label="新增特征" icon="pi pi-plus" size="small" [disabled]="!canEditMainData" (onClick)="service.addFeature()" /></div>
+            <div class="panel-heading"><span>技术特征树 <small class="owner-side">（代理人持有）</small></span><p-button label="新增特征" icon="pi pi-plus" size="small" [disabled]="!canEditMainData" (onClick)="service.addFeature()" /></div>
             <div class="feature-tree">
-              <button *ngFor="let feature of claimFeatures; let i = index" type="button" class="feature-item" [class.selected]="feature.id === state.selectedFeatureId" [style.--depth]="feature.parentId ? 1 : 0" (click)="service.selectFeature(feature.id)">
+              <button *ngFor="let feature of claimFeatures" type="button" class="feature-item" [class.selected]="feature.id === state.selectedFeatureId" [style.--depth]="feature.parentId ? 1 : 0" (click)="service.selectFeature(feature.id)">
                 <span class="feature-index">{{ feature.label.split('·')[0].trim() }}</span>
                 <span><strong>{{ feature.label }}</strong><small>{{ feature.text || '尚未填写特征内容' }}</small></span>
                 <i class="pi pi-chevron-right"></i>
@@ -73,27 +82,21 @@
             </div>
           </section>
 
-          <section class="panel feature-editor" *ngIf="selectedFeature as feature; else noFeature">
+          <ng-container *ngIf="selectedFeature as feature; else noFeature">
+          <section class="panel feature-editor">
             <div class="feature-title-row">
               <div><span class="eyebrow">当前技术特征</span><h2>{{ feature.label }}</h2></div>
-              <span class="owner-chip">负责角色：{{ ownerLabel(feature.ownerRole) }}</span>
+              <span class="owner-chip">归属：代理人主数据</span>
             </div>
             <label>特征名称<input pInputText [value]="feature.label" (change)="updateFeatureField('label', $event)" [disabled]="!canEditMainData"></label>
             <label>特征正文<textarea pTextarea rows="3" [value]="feature.text" (change)="updateFeatureField('text', $event)" [disabled]="!canEditMainData"></textarea></label>
-            <div class="form-row">
-              <label>父级特征
-                <select [value]="feature.parentId || ''" (change)="updateFeatureParent($event)" [disabled]="!canEditMainData">
-                  <option value="">无（顶层特征）</option>
-                  <option *ngFor="let candidate of claimFeatures" [value]="candidate.id" [disabled]="candidate.id === feature.id">{{ candidate.label }}</option>
-                </select>
-              </label>
-              <label>负责角色
-                <select [value]="feature.ownerRole" (change)="service.updateFeature(feature.id, { ownerRole: $any($event.target).value })" [disabled]="!canEditMainData">
-                  <option value="author">代理人</option><option value="examiner">审查员</option><option value="viewer">观察者</option>
-                </select>
-              </label>
+            <div class="field-block">父级特征
+              <select [value]="feature.parentId || ''" (change)="updateFeatureParent($event)" [disabled]="!canEditMainData">
+                <option value="">无（顶层特征）</option>
+                <option *ngFor="let candidate of claimFeatures" [value]="candidate.id" [disabled]="candidate.id === feature.id">{{ candidate.label }}</option>
+              </select>
             </div>
-            <fieldset class="reference-fieldset">
+            <fieldset class="reference-fieldset" [disabled]="!canEditMainData">
               <legend>引用其他特征（用于从属关系或部件回指）</legend>
               <label class="check-row" *ngFor="let candidate of claimFeatures" [class.hidden]="candidate.id === feature.id">
                 <input type="checkbox" [checked]="feature.referenceIds.includes(candidate.id)" (change)="toggleReference(candidate.id, $any($event.target).checked)" [disabled]="!canEditMainData || candidate.id === feature.id">
@@ -101,13 +104,17 @@
               </label>
             </fieldset>
             <div class="button-row"><p-button label="删除特征" icon="pi pi-trash" severity="danger" [outlined]="true" [disabled]="!canEditMainData" (onClick)="service.deleteFeature(feature.id)"></p-button></div>
+            <p class="stale-warn" *ngIf="featureHasStaleConclusion(feature.id)">
+              <i class="pi pi-exclamation-triangle"></i>该特征有审查结论因事后改动已作废，待审查员重新确认（见「审查同步」）。
+            </p>
           </section>
+          </ng-container>
           <ng-template #noFeature><section class="panel empty-state large">请选择一个技术特征进行编辑。</section></ng-template>
 
           <section class="panel support-panel">
-            <div class="panel-heading"><span>说明书支持依据</span><span class="heading-actions"><p-badge [value]="selectedFeature?.supportIds?.length || 0" severity="success" /><p-button label="新增段落" icon="pi pi-plus" size="small" [disabled]="!canEditMainData" (onClick)="service.addParagraph()" /></span></div>
+            <div class="panel-heading"><span>说明书支持依据 <small class="owner-side">（代理人持有）</small></span><span class="heading-actions"><p-badge [value]="selectedFeature?.supportIds?.length || 0" severity="success" /><p-button label="新增段落" icon="pi pi-plus" size="small" [disabled]="!canEditMainData" (onClick)="service.addParagraph()" /></span></div>
             <p class="hint">选择段落即建立映射；取消选择会移除映射。只有至少一个段落时可消除“缺少依据”。</p>
-            <article *ngFor="let paragraph of state.paragraphs" class="paragraph-card" [class.mapped]="selectedFeature && isMapped(selectedFeature, paragraph.id)">
+            <article *ngFor="let paragraph of state.author.paragraphs" class="paragraph-card" [class.mapped]="selectedFeature && isMapped(selectedFeature, paragraph.id)">
               <label>
                 <input type="checkbox" [checked]="selectedFeature && isMapped(selectedFeature, paragraph.id)" [disabled]="!selectedFeature || !canEditMainData" (change)="selectedFeature && service.toggleParagraphMapping(selectedFeature.id, paragraph.id)">
                 <span class="paragraph-label">{{ paragraph.section }}</span>
@@ -125,28 +132,32 @@
         <div class="mapping-summary">
           <div><span>特征覆盖</span><strong>{{ claimFeatures.length }}</strong></div>
           <div><span>已建立依据</span><strong>{{ mappedFeatureCount }}</strong></div>
-          <div><span>待清理映射</span><strong>{{ state.orphanMappings.length }}</strong></div>
-          <div><span>批注总数</span><strong>{{ state.annotations.length }}</strong></div>
+          <div><span>待清理映射</span><strong>{{ state.author.orphanMappings.length }}</strong></div>
+          <div><span>审查意见（全案件）</span><strong>{{ state.author.incoming.length }}</strong></div>
         </div>
 
         <section class="panel annotation-panel" *ngIf="selectedFeature as feature">
-          <div class="panel-heading"><span>特征批注</span><span class="permission-note"><i class="pi pi-lock"></i>仅可编辑本人批注</span></div>
+          <div class="panel-heading"><span>审查意见 <small class="owner-side">（审查员持有，带回后只读对账副本）</small></span><span class="permission-note"><i class="pi pi-lock"></i>代理人不能改写批注与结论</span></div>
           <div class="annotation-list">
-            <article class="annotation" *ngFor="let annotation of featureAnnotations" [class.own]="isOwnAnnotation(annotation)">
-              <header><strong>{{ annotation.authorName }}</strong><time>{{ annotation.updatedAt | date:'MM-dd HH:mm' }}</time></header>
-              <textarea pTextarea [value]="annotation.text" [readonly]="!isOwnAnnotation(annotation)" (change)="updateAnnotation(annotation, $event)"></textarea>
-              <p-button *ngIf="isOwnAnnotation(annotation)" label="删除" icon="pi pi-trash" severity="danger" [text]="true" size="small" (onClick)="service.deleteAnnotation(annotation.id)"></p-button>
+            <article class="annotation" *ngFor="let review of featureIncoming" [class.stale]="service.effectiveState(review) === 'stale'" [class.suspended]="service.effectiveState(review) === 'suspended'">
+              <header>
+                <strong>{{ review.authorName }} · {{ review.kind === 'conclusion' ? '审查结论' : '批注' }}<em *ngIf="review.kind === 'conclusion' && review.decision" class="decision-tag">{{ decisionLabel(review.decision) }}</em></strong>
+                <div class="review-meta">
+                  <span class="state-chip" [class.state-active]="service.effectiveState(review) === 'active'" [class.state-stale]="service.effectiveState(review) === 'stale'" [class.state-suspended]="service.effectiveState(review) === 'suspended'">{{ incomingStateLabel(review) }}</span>
+                  <time>{{ review.reviewedAt | date:'MM-dd HH:mm' }}</time>
+                </div>
+              </header>
+              <p class="annotation-text">{{ review.text }}</p>
+              <p class="annotation-snapshot">确认时指向：<b>{{ review.supportIds.length }}</b> 个段落<ng-container *ngIf="review.supportIds.length">（<span *ngFor="let id of review.supportIds; let last = last">{{ paragraphLabel(id) }}<ng-container *ngIf="!last">、</ng-container></span>）</ng-container></p>
+              <p class="drift-note" *ngIf="drift(review)"><i class="pi pi-info-circle"></i>批注确认后特征正文或支持段落已有改动，批注原文保留，仅供参照。</p>
             </article>
-            <div *ngIf="!featureAnnotations.length" class="empty-state">这个特征还没有批注。</div>
-          </div>
-          <div class="new-annotation">
-            <textarea pTextarea rows="2" placeholder="以{{ state.role === 'author' ? '代理人' : state.role === 'examiner' ? '审查员' : '观察者' }}身份补充批注…" [(ngModel)]="annotationDraft"></textarea>
-            <p-button label="添加批注" icon="pi pi-comment" [disabled]="!annotationDraft.trim()" (onClick)="addAnnotation()"></p-button>
+            <div *ngIf="!featureIncoming.length" class="empty-state">这个特征还没有审查员带回的批注或结论。</div>
           </div>
         </section>
       </div>
 
       <div class="view" *ngIf="state.activeTab === 'claim'">
+        <div class="role-readonly-hint" *ngIf="!canEditMainData"><i class="pi pi-lock"></i><span>权利要求正文仅代理人可编辑。</span></div>
         <section class="panel claim-editor">
           <div class="panel-heading"><span>权利要求正文</span><p-badge [value]="'第 ' + claim.number + ' 项'" /></div>
           <div class="form-row title-fields">
@@ -155,19 +166,162 @@
             <label class="check-row standalone"><input type="checkbox" [checked]="claim.independent" (change)="updateClaimField('independent', $event)" [disabled]="!canEditMainData">独立权利要求</label>
           </div>
           <label>正文<textarea pTextarea rows="12" [value]="claim.text" (change)="updateClaimField('text', $event)" [disabled]="!canEditMainData"></textarea></label>
-          <div class="edit-note"><i class="pi pi-info-circle"></i>特征拆分不会丢失原文。修改权利要求后，请重新检查特征覆盖和引用关系。</div>
+          <div class="edit-note"><i class="pi pi-info-circle"></i>特征拆分不会丢失原文。修改权利要求后，请重新检查特征覆盖和引用关系；审查结论将按最新正文与支持段落重新对账。</div>
         </section>
+      </div>
+
+      <!-- ============ 审查同步：两侧各自状态 ============ -->
+      <div class="view" *ngIf="state.activeTab === 'sync'">
+        <div class="sync-grid">
+
+          <!-- 审查员一侧 -->
+          <section class="panel sync-side examiner-side">
+            <div class="panel-heading"><span><i class="pi pi-user"></i> 审查员一侧 <small>批注 · 每条特征的审查结论</small></span></div>
+
+            <div class="sync-block">
+              <div class="sync-block-head">
+                <strong>代理人草稿副本</strong>
+                <p-button label="重新拉取代理人草稿" icon="pi pi-download" size="small" [outlined]="true" [disabled]="!isExaminer" (onClick)="pullCopy()"></p-button>
+              </div>
+              <p class="hint" *ngIf="state.examiner.copyAt">副本时间：{{ state.examiner.copyAt | date:'yyyy-MM-dd HH:mm:ss' }} · 共 {{ copyFeatures.length }} 个特征（只读）</p>
+
+              <div class="stale-banner" *ngIf="staleConclusionsForExaminer().length">
+                <i class="pi pi-exclamation-triangle"></i>
+                <div>
+                  <strong>{{ staleConclusionsForExaminer().length }} 条审查结论确认后特征又被代理人改动，已作废。</strong>
+                  <p>请对照最新副本重新确认；未重新确认前，这些结论在代理人一侧保持作废，其余意见照旧。</p>
+                  <div class="stale-item" *ngFor="let item of staleConclusionsForExaminer()">
+                    <span>{{ item.featureLabel }} · {{ decisionLabel(item.decision) }}</span>
+                    <p-button label="按最新副本重新确认" icon="pi pi-check" size="small" [disabled]="!isExaminer" (onClick)="reconfirm(item)"></p-button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="copy-list">
+                <article class="copy-item" *ngFor="let copy of copyFeatures">
+                  <header>
+                    <div><b>{{ copy.label }}</b><small>权利要求 {{ copy.claimNumber }} · {{ copy.supportIds.length }} 个支持段落</small></div>
+                    <p-button icon="pi pi-plus" size="small" [text]="true" [disabled]="!isExaminer" pTooltip="写批注 / 下结论" (onClick)="openReviewDialog(copy)"></p-button>
+                  </header>
+                  <p>{{ copy.text || '（特征正文为空）' }}</p>
+                  <div class="copy-items" *ngIf="itemsForCopy(copy.id).length">
+                    <div class="copy-review" *ngFor="let item of itemsForCopy(copy.id)">
+                      <div class="copy-review-main">
+                        <span class="kind-tag" [class.kind-conclusion]="item.kind === 'conclusion'">{{ item.kind === 'conclusion' ? '结论' : '批注' }}<em *ngIf="item.decision"> · {{ decisionLabel(item.decision) }}</em></span>
+                        <p>{{ item.text }}</p>
+                        <small>确认于 {{ item.reviewedAt | date:'MM-dd HH:mm' }}</small>
+                      </div>
+                      <div class="copy-review-actions">
+                        <span class="copy-status reconfirm" *ngIf="item.kind === 'conclusion' && service.needsReconfirm(item)"><i class="pi pi-exclamation-triangle"></i>待重新确认</span>
+                        <span class="copy-status" *ngIf="service.copyStatus(item) === 'changed'" [class.changed]="true"><i class="pi pi-exclamation-triangle"></i>副本已变</span>
+                        <span class="copy-status" *ngIf="service.copyStatus(item) === 'removed'" [class.removed]="true"><i class="pi pi-times"></i>特征已撤下</span>
+                        <span class="copy-status" *ngIf="!service.copyStatus(item)" class="current"><i class="pi pi-check"></i>与副本一致</span>
+                        <p-button icon="pi pi-pencil" size="small" [text]="true" [disabled]="!isExaminer" (onClick)="openReviewDialog(copy, item)"></p-button>
+                        <p-button icon="pi pi-trash" size="small" severity="danger" [text]="true" [disabled]="!isExaminer" (onClick)="deleteReviewItem(item.id)"></p-button>
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              </div>
+            </div>
+
+            <div class="sync-block">
+              <div class="sync-block-head">
+                <strong>发件箱与带回</strong>
+                <span class="failure-toggle">
+                  <label class="check-row"><input type="checkbox" [checked]="state.examiner.nextBringBackFails" [disabled]="!isExaminer" (change)="toggleFailureSimulation()">模拟下一次带回失败</label>
+                  <p-button label="带回代理人一侧" icon="pi pi-upload" size="small" [disabled]="!isExaminer || !pendingOutbox.length" (onClick)="bringBack()"></p-button>
+                </span>
+              </div>
+              <p class="hint">带回按“特征正文 + 指向段落”对账；失败时仅在本侧重试，代理人草稿和旧结论都不动，已对上的不重复挂。</p>
+              <div class="outbox-list">
+                <article class="outbox-item" *ngFor="let entry of pendingOutbox" [class.failed]="!!entry.lastError">
+                  <span class="kind-tag" [class.kind-conclusion]="outboxItemKind(entry) === 'conclusion'">{{ outboxItemKind(entry) === 'conclusion' ? '待带回·结论' : '待带回·批注' }}</span>
+                  <div class="outbox-main">
+                    <strong>{{ outboxItem(entry)?.featureLabel || '（意见已删除）' }}</strong>
+                    <small>已尝试 {{ entry.attempts }} 次<ng-container *ngIf="entry.lastError"> · {{ entry.lastError }}</ng-container></small>
+                  </div>
+                  <p-button label="重试" icon="pi pi-refresh" size="small" severity="warn" [outlined]="true" [disabled]="!isExaminer" (onClick)="bringBack()"></p-button>
+                </article>
+                <div *ngIf="!pendingOutbox.length" class="empty-state small">没有待带回的意见，全部送达。</div>
+              </div>
+              <div class="sync-log">
+                <strong>同步日志</strong>
+                <div class="log-line" *ngFor="let log of state.examiner.syncLog" [class.ok]="log.ok" [class.fail]="!log.ok">
+                  <i class="pi" [class.pi-check-circle]="log.ok" [class.pi-times-circle]="!log.ok"></i>
+                  <span>{{ log.detail }}</span><time>{{ log.at | date:'MM-dd HH:mm' }}</time>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- 代理人一侧 -->
+          <section class="panel sync-side author-side">
+            <div class="panel-heading"><span><i class="pi pi-pencil"></i> 代理人一侧 <small>带回后的对账结果</small></span></div>
+
+            <div class="reconcile-reports">
+              <article class="report-item" *ngFor="let report of state.author.reports">
+                <header><strong>批次 {{ report.batchId }}</strong><time>{{ report.at | date:'MM-dd HH:mm' }}</time></header>
+                <div class="report-counts">
+                  <span class="state-active">照旧有效 {{ report.activeCount }}</span>
+                  <span class="state-stale">作废待确认 {{ report.staleCount }}</span>
+                  <span class="state-suspended">挂起 {{ report.suspendedCount }}</span>
+                  <span class="state-skip">已对上跳过 {{ report.skippedCount }}</span>
+                </div>
+                <p>{{ report.detail }}</p>
+              </article>
+            </div>
+
+            <div class="sync-block" *ngIf="staleIncoming.length">
+              <div class="sync-block-head"><strong><i class="pi pi-exclamation-triangle"></i> 已作废 · 等审查员重新确认（{{ staleIncoming.length }}）</strong></div>
+              <div class="pending-list">
+                <article class="pending-item stale" *ngFor="let review of staleIncoming">
+                  <header>
+                    <strong>{{ review.featureLabel }} · {{ review.kind === 'conclusion' ? '审查结论' : '批注' }}<em *ngIf="review.decision" class="decision-tag">{{ decisionLabel(review.decision) }}</em></strong>
+                    <time>确认于 {{ review.reviewedAt | date:'MM-dd HH:mm' }}</time>
+                  </header>
+                  <p>{{ review.text }}</p>
+                  <p class="reason-line">该特征在结论之后又改动了正文或支持段落，结论作废；请切到审查员角色重新确认，代理人草稿与本条旧结论均保留。</p>
+                </article>
+              </div>
+            </div>
+
+            <div class="sync-block">
+              <div class="sync-block-head"><strong><i class="pi pi-pause-circle"></i> 挂起等人定（{{ suspendedIncoming.length }}）</strong></div>
+              <div class="pending-list">
+                <article class="pending-item suspended" *ngFor="let review of suspendedIncoming">
+                  <header>
+                    <strong>{{ review.featureLabel }} · {{ review.kind === 'conclusion' ? '审查结论' : '批注' }}<em *ngIf="review.decision" class="decision-tag">{{ decisionLabel(review.decision) }}</em></strong>
+                    <time>带回于 {{ review.broughtAt | date:'MM-dd HH:mm' }}</time>
+                  </header>
+                  <p>{{ review.text }}</p>
+                  <p class="reason-line"><i class="pi pi-pause"></i>{{ suspendReasonLabel(review.suspendReason) }}；确认时快照：{{ review.featureText }}<ng-container *ngIf="review.supportIds.length">；段落 {{ review.supportIds.length }} 个</ng-container></p>
+                  <div class="resolve-row" *ngIf="state.role === 'author'">
+                    <select [ngModel]="suspendAttachFeatureId[review.id] || ''" (ngModelChange)="suspendAttachFeatureId[review.id] = $event">
+                      <option value="" disabled>挂接到现存特征…</option>
+                      <option *ngFor="let feature of state.author.features" [value]="feature.id">权{{ claimNumberOf(feature.claimId) }} · {{ feature.label }}</option>
+                    </select>
+                    <p-button label="人工挂接" icon="pi pi-link" size="small" (onClick)="attachSuspended(review)" [disabled]="!suspendAttachFeatureId[review.id]"></p-button>
+                    <p-button label="丢弃副本" icon="pi pi-trash" size="small" severity="danger" [outlined]="true" (onClick)="discardSuspended(review)"></p-button>
+                  </div>
+                  <p class="reason-line" *ngIf="state.role !== 'author'">仅代理人可处理挂起项。</p>
+                </article>
+                <div *ngIf="!suspendedIncoming.length" class="empty-state small">没有挂起项，全部意见都已对上账。</div>
+              </div>
+            </div>
+          </section>
+        </div>
       </div>
 
       <div class="view" *ngIf="state.activeTab === 'compare'">
         <section class="panel compare-panel">
-          <div class="panel-heading"><span>权利要求版本比较</span><p-button label="保存当前版本" icon="pi pi-save" (onClick)="versionDialog = true" /></div>
-          <div class="compare-selects" *ngIf="state.versions.length >= 2; else needVersions">
-            <label>基准版本<p-select [options]="state.versions" optionLabel="name" optionValue="id" [(ngModel)]="compareA" /></label>
-            <label>目标版本<p-select [options]="state.versions" optionLabel="name" optionValue="id" [(ngModel)]="compareB" /></label>
+          <div class="panel-heading"><span>权利要求版本比较</span><p-button label="保存当前版本" icon="pi pi-save" [disabled]="!canEditMainData" (onClick)="versionDialog = true" /></div>
+          <div class="compare-selects" *ngIf="state.author.versions.length >= 2; else needVersions">
+            <label>基准版本<p-select [options]="state.author.versions" optionLabel="name" optionValue="id" [(ngModel)]="compareA" (ngModelChange)="syncVersions()" /></label>
+            <label>目标版本<p-select [options]="state.author.versions" optionLabel="name" optionValue="id" [(ngModel)]="compareB" (ngModelChange)="syncVersions()" /></label>
           </div>
           <ng-template #needVersions><div class="empty-state large">至少保存两个版本后即可比较。</div></ng-template>
-          <div *ngIf="state.versions.length >= 2" class="diff-list">
+          <div *ngIf="state.author.versions.length >= 2" class="diff-list">
             <article *ngFor="let row of compareRows()" [class.changed]="row.changed">
               <header><strong>{{ row.label }}</strong><span>{{ row.changed ? '有差异' : '未变化' }}</span></header>
               <div class="diff-cols">
@@ -176,11 +330,11 @@
               </div>
             </article>
           </div>
-          <div class="version-history" *ngIf="state.versions.length">
-            <h3>版本历史</h3>
-            <div class="version-row" *ngFor="let version of state.versions">
+          <div class="version-history" *ngIf="state.author.versions.length">
+            <h3>版本历史（只保存代理人一侧的权利要求与特征，不含审查意见）</h3>
+            <div class="version-row" *ngFor="let version of state.author.versions">
               <span><strong>{{ version.name }}</strong><small>{{ version.createdAt | date:'yyyy-MM-dd HH:mm' }} · {{ version.features.length }} 个特征</small></span>
-              <p-button label="恢复此版" icon="pi pi-history" [outlined]="true" size="small" (onClick)="restoreVersion(version.id)" />
+              <p-button label="恢复此版" icon="pi pi-history" [outlined]="true" size="small" [disabled]="!canEditMainData" (onClick)="restoreVersion(version.id)" />
             </div>
           </div>
         </section>
@@ -194,10 +348,10 @@
             <div><strong>{{ issue.title }}</strong><p>{{ issue.detail }}</p></div>
             <p-button label="定位" icon="pi pi-arrow-right" [text]="true" (onClick)="locateIssue(issue)" />
           </div>
-          <div *ngIf="!issues.length" class="empty-success large"><i class="pi pi-check-circle"></i><strong>所有权利要求均具备说明书支持且引用关系有效。</strong></div>
-          <div class="orphan-area" *ngIf="state.orphanMappings.length">
+          <div *ngIf="!issues.length" class="empty-success large"><i class="pi pi-check-circle"></i><strong>所有权利要求均具备说明书支持、引用关系有效，且没有待处理的审查对账项。</strong></div>
+          <div class="orphan-area" *ngIf="state.author.orphanMappings.length">
             <h3>已删除特征遗留的映射</h3>
-            <div class="orphan-row" *ngFor="let orphan of state.orphanMappings"><span>{{ orphan.reason }} 对应 {{ paragraphLabel(orphan.paragraphId) }}</span><p-button label="清理" size="small" severity="warn" (onClick)="service.clearOrphan(orphan.id)" /></div>
+            <div class="orphan-row" *ngFor="let orphan of state.author.orphanMappings"><span>{{ orphan.reason }} 对应 {{ paragraphLabel(orphan.paragraphId) }}</span><p-button label="清理" size="small" severity="warn" [disabled]="!canEditMainData" (onClick)="service.clearOrphan(orphan.id)" /></div>
           </div>
         </section>
       </div>
@@ -205,7 +359,7 @@
 
     <aside class="inspector">
       <section class="panel selected-summary" *ngIf="selectedFeature as feature; else noSelection">
-        <span class="eyebrow">映射状态</span>
+        <span class="eyebrow">映射状态 · 代理人持有</span>
         <h3>{{ feature.label }}</h3>
         <div class="score-ring" [class.complete]="feature.supportIds.length" [class.incomplete]="!feature.supportIds.length">
           <strong>{{ feature.supportIds.length }}</strong><small>支持段落</small>
@@ -213,12 +367,19 @@
         <dl>
           <dt>父级</dt><dd>{{ feature.parentId ? featureLabel(feature.parentId) : '顶层特征' }}</dd>
           <dt>引用</dt><dd>{{ feature.referenceIds.length }} 个特征</dd>
-          <dt>批注</dt><dd>{{ featureAnnotations.length }} 条</dd>
+          <dt>审查意见</dt><dd>{{ featureIncoming.length }} 条</dd>
         </dl>
         <div class="quick-map">
           <strong>支持映射</strong>
           <span *ngFor="let id of feature.supportIds">{{ paragraphLabel(id) }}</span>
           <em *ngIf="!feature.supportIds.length">尚未选择说明书段落</em>
+        </div>
+        <div class="quick-reviews" *ngIf="featureIncoming.length">
+          <strong>最新审查意见</strong>
+          <div class="quick-review" *ngFor="let review of featureIncoming.slice(0, 3)">
+            <span class="state-chip" [class.state-active]="service.effectiveState(review) === 'active'" [class.state-stale]="service.effectiveState(review) === 'stale'" [class.state-suspended]="service.effectiveState(review) === 'suspended'">{{ incomingStateLabel(review) }}</span>
+            <p>{{ review.text }}</p>
+          </div>
         </div>
       </section>
       <ng-template #noSelection><section class="panel empty-state">选择技术特征查看映射详情。</section></ng-template>
@@ -230,7 +391,7 @@
       </section>
       <section class="panel rule-card">
         <i class="pi pi-shield"></i>
-        <div><strong>批注权限隔离</strong><p>当前用户不能修改其他角色创建的批注，输入框保持只读。</p></div>
+        <div><strong>两侧状态隔离</strong><p>代理人只改特征/层级/引用/支持段落；审查员只改批注与结论。结论确认后特征又改动的，结论自动作废待重新确认；对不上的意见挂起等人定。</p></div>
       </section>
     </aside>
   </main>
@@ -238,12 +399,38 @@
 
 <p-dialog header="保存版本快照" [(visible)]="versionDialog" [modal]="true" [style]="{ width: '460px' }">
   <div class="dialog-body">
-    <p>保存当前全部权利要求和技术特征，用于后续比较或恢复。</p>
+    <p>保存代理人一侧当前全部权利要求和技术特征，用于后续比较或恢复；审查意见不属于版本快照。</p>
     <label>版本名称<input pInputText [(ngModel)]="versionName" placeholder="例如：答复审查意见前" (keyup.enter)="createVersion()"></label>
   </div>
   <ng-template pTemplate="footer">
     <p-button label="取消" severity="secondary" [outlined]="true" (onClick)="versionDialog = false" />
     <p-button label="保存快照" icon="pi pi-save" (onClick)="createVersion()" />
+  </ng-template>
+</p-dialog>
+
+<p-dialog [header]="(reviewDraft.kind === 'conclusion' ? '审查结论' : '批注') + ' · ' + (reviewDialogFeature?.label || '')" [(visible)]="reviewDialog" (visibleChange)="!$event && closeReviewDialog()" [modal]="true" [style]="{ width: '560px' }">
+  <div class="dialog-body" *ngIf="reviewDialogFeature as copy">
+    <div class="copy-context">
+      <small>依据审查员副本（{{ copy.supportIds.length }} 个支持段落）：</small>
+      <p>{{ copy.text || '（特征正文为空）' }}</p>
+    </div>
+    <label class="check-row standalone">
+      <input type="radio" name="reviewKind" value="conclusion" [(ngModel)]="reviewDraft.kind"> 审查结论（每条特征一条）
+    </label>
+    <label class="check-row standalone">
+      <input type="radio" name="reviewKind" value="annotation" [(ngModel)]="reviewDraft.kind"> 批注
+    </label>
+    <label *ngIf="reviewDraft.kind === 'conclusion'">结论类型
+      <p-select [options]="decisionOptions" optionLabel="label" optionValue="value" [(ngModel)]="reviewDraft.decision" />
+    </label>
+    <label>{{ reviewDraft.kind === 'conclusion' ? '结论说明' : '批注内容' }}
+      <textarea pTextarea rows="4" [(ngModel)]="reviewDraft.text" [placeholder]="reviewDraft.kind === 'conclusion' ? '记载对该特征的审查意见与法条依据…' : '批注内容…'"></textarea>
+    </label>
+    <p class="hint">保存后以当前副本的“特征正文 + 支持段落”为快照进入发件箱；代理人带回时按此对账，之后特征再改动会使结论作废。</p>
+  </div>
+  <ng-template pTemplate="footer">
+    <p-button label="取消" severity="secondary" [outlined]="true" (onClick)="closeReviewDialog()" />
+    <p-button label="进入发件箱" icon="pi pi-send" [disabled]="!reviewDraft.text.trim()" (onClick)="saveReviewDraft()" />
   </ng-template>
 </p-dialog>
 
