@@ -18,7 +18,7 @@
       <section class="panel role-panel">
         <label for="role">当前角色</label>
         <p-select inputId="role" [options]="roleOptions" optionLabel="label" optionValue="value" [ngModel]="state.role" (ngModelChange)="service.setRole($event)" />
-        <p class="hint">{{ currentRoleLabel }}。批注权限按作者锁定。</p>
+        <p class="hint">两边各自持有状态：代理人管特征、层级、引用与支持段落；审查员在快照上写批注与结论。批注权限按作者锁定。</p>
       </section>
 
       <section class="panel">
@@ -57,16 +57,40 @@
         <button [class.active]="state.activeTab === 'claim'" (click)="service.setTab('claim')"><i class="pi pi-file-edit"></i>权利要求录入</button>
         <button [class.active]="state.activeTab === 'compare'" (click)="service.setTab('compare')"><i class="pi pi-arrows-h"></i>版本比较</button>
         <button [class.active]="state.activeTab === 'audit'" (click)="service.setTab('audit')"><i class="pi pi-check-square"></i>核对清单</button>
+        <button *ngIf="state.role === 'examiner'" [class.active]="state.activeTab === 'review'" (click)="service.setTab('review')"><i class="pi pi-user-edit"></i>审查台</button>
       </nav>
 
       <div class="view" *ngIf="state.activeTab === 'mapping'">
+        <section class="panel suspended-panel" *ngIf="suspendedItems().length">
+          <div class="panel-heading"><span>待人工指定的审查意见（挂起）</span><span class="heading-actions"><p-badge [value]="suspendedItems().length" severity="warn" /></span></div>
+          <p class="hint">以下审查意见指向已撤下特征或与当前特征对不上，未自动应用。请人工指定到对应特征，或忽略。</p>
+          <div class="suspended-row" *ngFor="let item of suspendedItems()">
+            <div class="suspended-info">
+              <strong>{{ item.featureLabelSnapshot }}</strong>
+              <small>正文：{{ item.featureTextSnapshot || '（无）' }}</small>
+              <small>指向段落：{{ item.paragraphSectionSnapshot || '—' }}</small>
+              <p>{{ item.text || '（无批注）' }}</p>
+            </div>
+            <div class="suspended-actions">
+              <select [ngModel]="suspendedAssignments[item.id]" (ngModelChange)="suspendedAssignments[item.id] = $event" aria-label="指定到特征">
+                <option value="">选择对应特征…</option>
+                <option *ngFor="let feature of state.features" [value]="feature.id">{{ feature.label }} · {{ feature.text }}</option>
+              </select>
+              <p-button label="指定到该特征" icon="pi pi-check" size="small" [disabled]="!suspendedAssignments[item.id]" (onClick)="resolveSuspended(item, true)"></p-button>
+              <p-button label="忽略" icon="pi pi-times" size="small" severity="secondary" [outlined]="true" (onClick)="resolveSuspended(item, false)"></p-button>
+            </div>
+          </div>
+        </section>
+
         <div class="mapping-grid">
           <section class="panel feature-list-panel">
             <div class="panel-heading"><span>技术特征树</span><p-button label="新增特征" icon="pi pi-plus" size="small" [disabled]="!canEditMainData" (onClick)="service.addFeature()" /></div>
             <div class="feature-tree">
               <button *ngFor="let feature of claimFeatures; let i = index" type="button" class="feature-item" [class.selected]="feature.id === state.selectedFeatureId" [style.--depth]="feature.parentId ? 1 : 0" (click)="service.selectFeature(feature.id)">
                 <span class="feature-index">{{ feature.label.split('·')[0].trim() }}</span>
-                <span><strong>{{ feature.label }}</strong><small>{{ feature.text || '尚未填写特征内容' }}</small></span>
+                <span><strong>{{ feature.label }}</strong><small>{{ feature.text || '尚未填写特征内容' }}</small>
+                  <span class="review-badge" *ngIf="reviewRecordFor(feature.id) as rr" [class.void]="rr.status === 'void'"><i class="pi" [class.pi-check-circle]="rr.status === 'confirmed'" [class.pi-exclamation-triangle]="rr.status === 'void'"></i>{{ rr.status === 'confirmed' ? '已确认 · ' + conclusionLabel(rr.conclusion) : '作废 · 待审查员重新确认' }}</span>
+                </span>
                 <i class="pi pi-chevron-right"></i>
               </button>
               <div *ngIf="!claimFeatures.length" class="empty-state">尚未拆分技术特征</div>
@@ -133,7 +157,7 @@
           <div class="panel-heading"><span>特征批注</span><span class="permission-note"><i class="pi pi-lock"></i>仅可编辑本人批注</span></div>
           <div class="annotation-list">
             <article class="annotation" *ngFor="let annotation of featureAnnotations" [class.own]="isOwnAnnotation(annotation)">
-              <header><strong>{{ annotation.authorName }}</strong><time>{{ annotation.updatedAt | date:'MM-dd HH:mm' }}</time></header>
+              <header><strong>{{ annotation.authorName }}</strong><time>{{ annotation.updatedAt | date:'MM-dd HH:mm' }}</time><span class="origin-tag" *ngIf="annotation.originItemId"><i class="pi pi-upload"></i>带回</span></header>
               <textarea pTextarea [value]="annotation.text" [readonly]="!isOwnAnnotation(annotation)" (change)="updateAnnotation(annotation, $event)"></textarea>
               <p-button *ngIf="isOwnAnnotation(annotation)" label="删除" icon="pi pi-trash" severity="danger" [text]="true" size="small" (onClick)="service.deleteAnnotation(annotation.id)"></p-button>
             </article>
@@ -201,6 +225,56 @@
           </div>
         </section>
       </div>
+
+      <div class="view" *ngIf="state.activeTab === 'review'">
+        <section class="panel review-desk">
+          <div class="panel-heading">
+            <span>审查台（审查员侧状态）</span>
+            <span class="heading-actions">
+              <p-button label="领取代理人快照" icon="pi pi-refresh" size="small" [outlined]="true" (onClick)="takeSnapshot()"></p-button>
+              <p-button label="带回审查结果" icon="pi pi-upload" size="small" (onClick)="bringBack()"></p-button>
+            </span>
+          </div>
+          <p class="hint">审查员在自己的快照副本上填写结论与批注，不动代理人的特征草稿。带回时按特征正文与指向段落对账：特征在结论之后又改动的结论作废、等重新确认；指向已撤下特征或对不上的挂起等人定。带回失败后从审查员一侧重试，已对上的不重复挂起，代理人草稿与旧结论保留。</p>
+          <div class="review-toolbar">
+            <label class="check-row"><input type="checkbox" [(ngModel)]="simulateFailure"><span>模拟带回中途失败（验证重试时已对上的不重复挂起、草稿与旧结论都保留）</span></label>
+            <p-button *ngIf="lastBringBack?.failed" label="重试带回" icon="pi pi-replay" severity="warn" size="small" (onClick)="retryBringBack()"></p-button>
+          </div>
+          <div class="bringback-result" *ngIf="lastBringBack as r" [class.failed]="r.failed">
+            <span>本次带回：已应用 <b>{{ r.applied }}</b>，作废 <b>{{ r.voided }}</b>，挂起 <b>{{ r.suspended }}</b>，待处理 <b>{{ r.pending }}</b></span>
+            <span *ngIf="r.failed" class="fail-msg"><i class="pi pi-exclamation-triangle"></i>带回在应用中途失败：已应用的结论保留，未处理条目保持待处理，可重试；已对上的不会重复挂起。</span>
+          </div>
+          <div class="review-list">
+            <article class="review-card" *ngFor="let snap of examiner.snapshotFeatures">
+              <header>
+                <span class="feature-index">{{ snap.label.split('·')[0].trim() }}</span>
+                <strong>{{ snap.label }}</strong>
+                <small>权利要求 {{ snap.claimNumber }}</small>
+                <span class="item-status" *ngIf="itemOf(snap.id) as item" [class]="item.status">{{ statusLabel(item.status) }}</span>
+              </header>
+              <p class="snap-text">{{ snap.text || '（无正文）' }}</p>
+              <p class="snap-paras">指向段落：<em *ngIf="!snap.supportSections.length">无</em><span class="para-chip" *ngFor="let s of snap.supportSections">{{ s }}</span></p>
+              <ng-container *ngIf="itemOf(snap.id) as item; else noItem">
+                <div class="conclusion-row">
+                  <label class="check-row" *ngFor="let opt of conclusionOptions">
+                    <input type="radio" [name]="'conclusion-' + snap.id" [ngModel]="item.conclusion" (ngModelChange)="updateExaminerItem(item, { conclusion: $event })" [value]="opt.value">
+                    <span>{{ opt.label }}</span>
+                  </label>
+                </div>
+                <textarea pTextarea rows="2" [ngModel]="item.text" (ngModelChange)="updateExaminerItem(item, { text: $event })" placeholder="填写审查批注…"></textarea>
+                <div class="card-actions">
+                  <p-button *ngIf="item.status === 'void'" label="重新确认" icon="pi pi-check" size="small" (onClick)="reconfirmItem(item)"></p-button>
+                  <p-button label="删除" icon="pi pi-trash" severity="danger" [text]="true" size="small" (onClick)="removeExaminerItem(item)"></p-button>
+                </div>
+              </ng-container>
+              <ng-template #noItem>
+                <p-button label="为该特征填写审查意见" icon="pi pi-plus" size="small" [outlined]="true" (onClick)="addExaminerItem(snap.id)"></p-button>
+              </ng-template>
+            </article>
+            <div *ngIf="!examiner.snapshotFeatures.length" class="empty-state">尚未领取代理人快照。</div>
+          </div>
+        </section>
+      </div>
     </section>
 
     <aside class="inspector">
@@ -214,6 +288,7 @@
           <dt>父级</dt><dd>{{ feature.parentId ? featureLabel(feature.parentId) : '顶层特征' }}</dd>
           <dt>引用</dt><dd>{{ feature.referenceIds.length }} 个特征</dd>
           <dt>批注</dt><dd>{{ featureAnnotations.length }} 条</dd>
+          <dt>审查结论</dt><dd><span class="review-status" *ngIf="reviewRecordFor(feature.id) as rr" [class.void]="rr.status === 'void'">{{ rr.status === 'confirmed' ? '已确认 · ' + conclusionLabel(rr.conclusion) : '作废 · 待重审' }}</span><em *ngIf="!reviewRecordFor(feature.id)" class="review-none">未审查</em></dd>
         </dl>
         <div class="quick-map">
           <strong>支持映射</strong>

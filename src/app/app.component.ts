@@ -10,7 +10,7 @@ import { BadgeModule } from 'primeng/badge'
 import { DialogModule } from 'primeng/dialog'
 import { TooltipModule } from 'primeng/tooltip'
 import { Subscription } from 'rxjs'
-import type { Annotation, Claim, Feature, Role, ValidationIssue, WorkbenchState } from './models'
+import type { Annotation, BringBackResult, Claim, ExaminerItem, ExaminerSnapshotFeature, ExaminerState, Feature, ReviewConclusion, ReviewRecord, Role, ValidationIssue, WorkbenchState } from './models'
 import { WorkbenchService } from './workbench.service'
 
 @Component({
@@ -30,20 +30,36 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
   versionDialog = false
   versionName = ''
   activeIssue: ValidationIssue | null = null
+  /** 审查员侧状态与带回结果 */
+  reviewRecords: ReviewRecord[] = []
+  examiner: ExaminerState = { snapshotAt: null, snapshotFeatures: [], items: [] }
+  simulateFailure = false
+  lastBringBack: BringBackResult | null = null
+  suspendedAssignments: Record<string, string> = {}
+  conclusionOptions: Array<{ label: string; value: ReviewConclusion }> = [
+    { label: '通过', value: 'approved' },
+    { label: '不通过', value: 'rejected' },
+    { label: '需修改', value: 'amended' }
+  ]
   roleOptions: Array<{ label: string; value: Role }> = [
-    { label: '代理人（可编辑主数据与本人批注）', value: 'author' },
-    { label: '审查员（可编辑本人批注）', value: 'examiner' },
+    { label: '代理人（管理技术特征、层级、引用与支持段落，可编辑本人批注）', value: 'author' },
+    { label: '审查员（在快照上写批注与审查结论，不可改特征草稿）', value: 'examiner' },
     { label: '观察者（只读）', value: 'viewer' }
   ]
   private subscriptions = new Subscription()
 
   constructor(readonly service: WorkbenchService) {
     this.state = service.snapshot
+    this.reviewRecords = service.snapshot.reviewRecords
+    this.examiner = service.snapshot.examiner
+    this.simulateFailure = service.simulateBringBackFailure
   }
 
   ngOnInit(): void {
     this.subscriptions.add(this.service.state$.subscribe(state => {
       this.state = structuredClone(state)
+      this.reviewRecords = state.reviewRecords
+      this.examiner = state.examiner
       this.syncVersions()
     }))
     this.subscriptions.add(this.service.issues$.subscribe(issues => this.issues = issues))
@@ -68,7 +84,7 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
   get currentRoleLabel(): string { return this.roleOptions.find(item => item.value === this.state.role)?.label || '' }
   get errorCount(): number { return this.issues.filter(item => item.severity === 'error').length }
   get warningCount(): number { return this.issues.filter(item => item.severity === 'warning').length }
-  get canEditMainData(): boolean { return this.state.role !== 'viewer' }
+  get canEditMainData(): boolean { return this.state.role === 'author' }
   get mappedFeatureCount(): number { return this.claimFeatures.filter(feature => feature.supportIds.length > 0).length }
 
   claimLabel(id: string): string { return this.state.claims.find(item => item.id === id)?.title || '未命名权利要求' }
@@ -77,6 +93,64 @@ export class AppComponent implements OnInit, AfterViewInit, OnDestroy {
   isMapped(feature: Feature, paragraphId: string): boolean { return feature.supportIds.includes(paragraphId) }
   isOwnAnnotation(annotation: Annotation): boolean { return annotation.authorRole === this.state.role }
   ownerLabel(role: Role): string { return ({ author: '代理人', examiner: '审查员', viewer: '观察者' })[role] }
+
+  // ---- 审查结论与审查员侧状态 ---------------------------------------------
+
+  reviewRecordFor(featureId: string): ReviewRecord | undefined {
+    return this.reviewRecords.find(record => record.featureId === featureId)
+  }
+
+  conclusionLabel(conclusion: ReviewConclusion | null): string {
+    return this.conclusionOptions.find(option => option.value === conclusion)?.label || '未结论'
+  }
+
+  conclusionSeverity(conclusion: ReviewConclusion | null): 'success' | 'danger' | 'warn' | 'info' {
+    if (conclusion === 'approved') return 'success'
+    if (conclusion === 'rejected') return 'danger'
+    if (conclusion === 'amended') return 'warn'
+    return 'info'
+  }
+
+  statusLabel(status: ExaminerItem['status']): string {
+    return ({ pending: '待带回', matched: '已对上', void: '作废·待重审', suspended: '已挂起' })[status]
+  }
+
+  suspendedItems(): ExaminerItem[] { return this.examiner.items.filter(item => item.status === 'suspended') }
+  pendingItems(): ExaminerItem[] { return this.examiner.items.filter(item => item.status === 'pending') }
+  itemOf(snapshotFeatureId: string): ExaminerItem | undefined {
+    return this.examiner.items.find(item => item.snapshotFeatureId === snapshotFeatureId)
+  }
+  snapshotFeatureOf(item: ExaminerItem): ExaminerSnapshotFeature | undefined {
+    return this.examiner.snapshotFeatures.find(snap => snap.id === item.snapshotFeatureId)
+  }
+
+  takeSnapshot(): void { this.service.takeSnapshot() }
+
+  addExaminerItem(snapshotFeatureId: string): void { this.service.addExaminerItem(snapshotFeatureId) }
+
+  updateExaminerItem(item: ExaminerItem, patch: Partial<ExaminerItem>): void {
+    this.service.updateExaminerItem(item.id, patch)
+  }
+
+  removeExaminerItem(item: ExaminerItem): void { this.service.removeExaminerItem(item.id) }
+
+  reconfirmItem(item: ExaminerItem): void { this.service.reconfirmItem(item.id) }
+
+  bringBack(): void {
+    this.service.simulateBringBackFailure = this.simulateFailure
+    this.lastBringBack = this.service.bringBack()
+  }
+
+  retryBringBack(): void {
+    this.service.simulateBringBackFailure = this.simulateFailure
+    this.lastBringBack = this.service.retryBringBack()
+  }
+
+  resolveSuspended(item: ExaminerItem, assign: boolean): void {
+    const featureId = assign ? (this.suspendedAssignments[item.id] || null) : null
+    this.service.resolveSuspended(item.id, featureId)
+    if (!assign) delete this.suspendedAssignments[item.id]
+  }
 
   updateClaimField(field: 'title' | 'text' | 'number' | 'independent', event: Event): void {
     const element = event.target as HTMLInputElement
